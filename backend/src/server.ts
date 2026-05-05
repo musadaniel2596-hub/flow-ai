@@ -27,6 +27,12 @@ app.use(
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+// Simple request logger to aid debugging (printed in Render logs)
+app.use((req, _res, next) => {
+  console.log(`${new Date().toISOString()}  → ${req.method} ${req.originalUrl}`);
+  next();
+});
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // Health check endpoint (for Render deployment)
@@ -42,9 +48,10 @@ app.get("/health", (_req, res) => {
 app.use("/analyze", analyzeRouter);
 app.use("/vision", visionRouter);
 
-// 404 handler
-app.use((_req, res) => {
-  res.status(404).json({ error: "Route not found" });
+// 404 handler — log the requested path and return it in the response for easier debugging
+app.use((req: express.Request, res: express.Response) => {
+  console.warn(`${new Date().toISOString()}  ⚠  404 ${req.method} ${req.originalUrl}`);
+  res.status(404).json({ error: "Route not found", path: req.originalUrl, method: req.method });
 });
 
 // Global error handler
