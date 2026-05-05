@@ -35,6 +35,15 @@ app.use((req, _res, next) => {
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
+// Root endpoint
+app.get("/", (_req, res) => {
+  res.json({
+    message: "Flow AI API is running",
+    docs: "Check /health for status",
+    version: "1.0.0"
+  });
+});
+
 // Health check endpoint (for Render deployment)
 app.get("/health", (_req, res) => {
   res.json({
