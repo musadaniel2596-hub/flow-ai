@@ -56,7 +56,6 @@ Edit `backend/.env`:
 OPENROUTER_API_KEY=your_openrouter_key_here
 OPENROUTER_MODEL=openrouter/auto
 OPENROUTER_VISION_MODEL=meta-llama/llama-3.2-90b-vision-instruct
-PORT=5000
 FRONTEND_URL=http://localhost:3000
 ```
 
@@ -65,7 +64,7 @@ FRONTEND_URL=http://localhost:3000
 ```bash
 cd backend
 npm run dev
-# → http://localhost:5000
+# → http://localhost (check server console for actual port)
 ```
 
 ### 4. Run frontend
