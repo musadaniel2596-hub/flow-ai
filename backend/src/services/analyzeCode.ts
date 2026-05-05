@@ -2,6 +2,8 @@ import { callOpenRouter } from "./openrouter";
 
 export interface CodeError {
   line: number;
+  // 1-based column (character) position where the issue starts (optional)
+  col?: number;
   message: string;
   fix: string;
   severity: "error" | "warning" | "info";
@@ -28,6 +30,7 @@ The JSON must follow this exact structure:
   "errors": [
     {
       "line": <line number as integer>,
+      "col": <column number as integer, 1-based, optional>,
       "message": "clear description of the error",
       "fix": "specific fix instruction",
       "severity": "error" | "warning" | "info"
@@ -41,6 +44,7 @@ Rules:
 - If no errors found, return empty errors array and set fixedCode to the original code
 - Always detect the programming language
 - Line numbers must be accurate integers
+- Column numbers must be accurate integers (1-based) when possible; if column is unknown omit it or set to null
 - fixedCode must be the complete working code, not just the fixed parts
 - Return ONLY the JSON object, nothing else`;
 
@@ -88,6 +92,12 @@ function parseAnalysisResponse(raw: string): AnalysisResult {
     errors: Array.isArray(parsed.errors)
       ? parsed.errors.map((e) => ({
           line: typeof e.line === "number" ? e.line : parseInt(e.line) || 0,
+          col:
+            typeof e.col === "number"
+              ? e.col
+              : typeof e.col === "string"
+              ? parseInt(e.col) || undefined
+              : undefined,
           message: e.message || "Unknown error",
           fix: e.fix || "Review this line",
           severity: (["error", "warning", "info"].includes(e.severity)

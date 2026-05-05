@@ -22,9 +22,13 @@ export default function Editor({
 }: EditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
   const [hoveredError, setHoveredError] = useState<CodeError | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const [markers, setMarkers] = useState<
+    { id: string; left: number; top: number; severity: CodeError['severity'] }[]
+  >([]);
 
   const lines = code.split("\n");
   const totalLines = lines.length;
@@ -35,6 +39,10 @@ export default function Editor({
     const { scrollTop, scrollLeft } = textareaRef.current;
     highlightRef.current.scrollTop = scrollTop;
     highlightRef.current.scrollLeft = scrollLeft;
+    if (overlayRef.current) {
+      overlayRef.current.scrollTop = scrollTop;
+      overlayRef.current.scrollLeft = scrollLeft;
+    }
     lineNumbersRef.current.scrollTop = scrollTop;
   }, []);
 
@@ -86,6 +94,39 @@ export default function Editor({
     const withErrors = applyErrorHighlights(highlightedLines, errors);
     return withErrors.join("\n") + "\n"; // Extra newline for proper height
   }, [lines, language, errors]);
+
+  // Compute column markers when code or errors change
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) {
+      setMarkers([]);
+      return;
+    }
+
+    const cs = window.getComputedStyle(ta);
+    const fontSize = cs.fontSize || "14px";
+    const fontFamily = cs.fontFamily || "monospace";
+    const lineHeight = parseFloat(cs.lineHeight) || 22.4;
+    const padLeft = 16; // keep in sync with inline styles
+    const padTop = 16;
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.font = `${fontSize} ${fontFamily}`;
+    const charWidth = ctx.measureText("0").width || 8;
+
+    const newMarkers = errors
+      .filter((e) => typeof e.col === "number" && e.col! > 0 && e.line > 0)
+      .map((e) => ({
+        id: `m-${e.line}-${e.col}`,
+        left: padLeft + (e.col! - 1) * charWidth,
+        top: padTop + (e.line - 1) * lineHeight,
+        severity: e.severity,
+      }));
+
+    setMarkers(newMarkers);
+  }, [errors, code]);
 
   // Handle line hover for error tooltip
   const handleMouseMove = useCallback(
@@ -198,6 +239,41 @@ export default function Editor({
           autoComplete="off"
           aria-label="Code editor"
         />
+
+        {/* Column markers overlay (above highlight, pointer-events none) */}
+        <div
+          ref={overlayRef}
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            fontSize: 14,
+            lineHeight: "22.4px",
+            overflowX: "auto",
+            overflowY: "hidden",
+            paddingTop: 16,
+            paddingBottom: 16,
+            paddingLeft: 16,
+            paddingRight: 16,
+            zIndex: 3,
+          }}
+        >
+          {markers.map((m) => (
+            <div
+              key={m.id}
+              style={{
+                position: "absolute",
+                left: m.left,
+                top: m.top + 8,
+                width: 8,
+                height: 8,
+                borderRadius: 9999,
+                background:
+                  m.severity === "error" ? "#ef4444" : "#f59e0b",
+                boxShadow: "0 0 6px rgba(0,0,0,0.4)",
+                transform: "translateY(-50%)",
+              }}
+            />
+          ))}
+        </div>
 
         {/* Empty state hint */}
         {!code && (

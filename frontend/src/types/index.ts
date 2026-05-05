@@ -2,6 +2,8 @@
 
 export interface CodeError {
   line: number;
+  // 1-based column position for fine-grained markers (optional)
+  col?: number;
   message: string;
   fix: string;
   severity: "error" | "warning" | "info";
