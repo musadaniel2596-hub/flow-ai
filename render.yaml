@@ -1,0 +1,42 @@
+# render.yaml — Deploy Flow AI to Render
+# Deploy both backend and frontend as separate services
+
+services:
+  # ── Backend API (Node.js / Express) ──────────────────────────────────────────
+  - type: web
+    name: flow-ai-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: OPENROUTER_API_KEY
+        sync: false  # Set this manually in Render dashboard — NEVER commit your key!
+      - key: OPENROUTER_MODEL
+        value: openrouter/auto
+      - key: OPENROUTER_VISION_MODEL
+        value: meta-llama/llama-3.2-90b-vision-instruct
+      - key: FRONTEND_URL
+        sync: false  # Set to your frontend Render URL after deployment
+
+  # ── Frontend (Next.js) ───────────────────────────────────────────────────────
+  - type: web
+    name: flow-ai-frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        sync: false  # Set to your backend Render URL after deployment
+      - key: PORT
+        value: 3000

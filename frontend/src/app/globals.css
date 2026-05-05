@@ -1,0 +1,193 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0a0e1a;
+  --bg-secondary: #0f172a;
+  --bg-editor: #0d1117;
+  --accent-blue: #3b82f6;
+  --accent-cyan: #06b6d4;
+  --error-red: #ef4444;
+  --text-primary: #e5e7eb;
+  --text-secondary: #9ca3af;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'DM Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e3a5f;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3b82f6;
+}
+
+/* Editor-specific scrollbar */
+.editor-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.editor-scroll::-webkit-scrollbar-track {
+  background: #0d1117;
+}
+
+.editor-scroll::-webkit-scrollbar-thumb {
+  background: #1e2d3d;
+  border-radius: 4px;
+}
+
+/* Glassmorphism utility */
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Glow effects */
+.glow-blue {
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+}
+
+.glow-red {
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
+}
+
+/* Editor textarea overlay technique */
+.editor-container {
+  position: relative;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+.editor-textarea {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  color: transparent;
+  caret-color: #3b82f6;
+  resize: none;
+  border: none;
+  outline: none;
+  padding: 16px;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  tab-size: inherit;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow: auto;
+  z-index: 2;
+  -webkit-text-fill-color: transparent;
+}
+
+.editor-highlight {
+  position: relative;
+  padding: 16px;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow: auto;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Error line highlight */
+.error-line {
+  background: rgba(239, 68, 68, 0.08);
+  border-left: 2px solid #ef4444;
+  display: block;
+  width: 100%;
+}
+
+.warning-line {
+  background: rgba(245, 158, 11, 0.08);
+  border-left: 2px solid #f59e0b;
+  display: block;
+  width: 100%;
+}
+
+/* Syntax colors */
+.syn-keyword { color: #c792ea; }
+.syn-string { color: #c3e88d; }
+.syn-number { color: #f78c6c; }
+.syn-comment { color: #546e7a; font-style: italic; }
+.syn-function { color: #82aaff; }
+.syn-operator { color: #89ddff; }
+.syn-punctuation { color: #89ddff; }
+.syn-type { color: #ffcb6b; }
+.syn-builtin { color: #80cbc4; }
+.syn-variable { color: #eeffff; }
+.syn-tag { color: #f07178; }
+.syn-attribute { color: #ffcb6b; }
+
+/* Animations */
+@keyframes scan-line {
+  0% { transform: translateY(-100%); opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: translateY(100vh); opacity: 0; }
+}
+
+.scan-animation::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #3b82f6, transparent);
+  animation: scan-line 2s ease-in-out;
+}
+
+/* Loading spinner */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(59, 130, 246, 0.3);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Transition utilities */
+.transition-smooth {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
