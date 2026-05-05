@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useRef, useEffect, useCallback, useState, useMemo } from "react";
 import { CodeError } from "@/types";
 import { highlightSyntax } from "@/lib/syntaxColors";
 import { applyErrorHighlights, getLineError } from "@/lib/highlightErrors";
@@ -24,36 +24,42 @@ export default function Editor({
   const highlightRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
+
   const [hoveredError, setHoveredError] = useState<CodeError | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
-  const [markers, setMarkers] = useState<
-    { id: string; left: number; top: number; severity: CodeError['severity'] }[]
-  >([]);
+  const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
 
-  const lines = code.split("\n");
+  const lines = useMemo(() => code.split("\n"), [code]);
   const totalLines = lines.length;
 
-  // Sync scroll between textarea and highlight layer
+  // Sync scroll between textarea and all other layers
   const syncScroll = useCallback(() => {
-    if (!textareaRef.current || !highlightRef.current || !lineNumbersRef.current) return;
+    if (!textareaRef.current) return;
     const { scrollTop, scrollLeft } = textareaRef.current;
-    highlightRef.current.scrollTop = scrollTop;
-    highlightRef.current.scrollLeft = scrollLeft;
+
+    if (highlightRef.current) {
+      highlightRef.current.scrollTop = scrollTop;
+      highlightRef.current.scrollLeft = scrollLeft;
+    }
     if (overlayRef.current) {
       overlayRef.current.scrollTop = scrollTop;
       overlayRef.current.scrollLeft = scrollLeft;
     }
-    lineNumbersRef.current.scrollTop = scrollTop;
+    if (lineNumbersRef.current) {
+      lineNumbersRef.current.scrollTop = scrollTop;
+    }
   }, []);
 
   useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
     ta.addEventListener("scroll", syncScroll);
+    // Initial sync
+    syncScroll();
     return () => ta.removeEventListener("scroll", syncScroll);
   }, [syncScroll]);
 
-  // Update cursor position
+  // Update cursor position and notify parent
   const updateCursor = useCallback(() => {
     const ta = textareaRef.current;
     if (!ta) return;
@@ -62,10 +68,12 @@ export default function Editor({
     const linesBefore = textBefore.split("\n");
     const line = linesBefore.length;
     const col = linesBefore[linesBefore.length - 1].length + 1;
+
+    setCursorPos({ line, col });
     onCursorChange(line, col);
   }, [onCursorChange]);
 
-  // Handle tab key
+  // Handle keyboard events (Tab, etc.)
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === "Tab") {
@@ -76,248 +84,136 @@ export default function Editor({
         const newValue =
           ta.value.substring(0, start) + "  " + ta.value.substring(end);
         onChange(newValue);
-        // Restore cursor position after React update
-        setTimeout(() => {
+
+        // Use requestAnimationFrame to ensure React has rendered the new value
+        requestAnimationFrame(() => {
           ta.selectionStart = ta.selectionEnd = start + 2;
-        }, 0);
+          updateCursor();
+        });
       }
     },
-    [onChange]
+    [onChange, updateCursor]
   );
 
   // Build highlighted HTML
-  const getHighlightedHTML = useCallback(() => {
+  const highlightedHTML = useMemo(() => {
     const highlightedLines = lines.map((line) =>
-      highlightSyntax(line, language)
+      highlightSyntax(line || " ", language)
     );
-
     const withErrors = applyErrorHighlights(highlightedLines, errors);
-    return withErrors.join("\n") + "\n"; // Extra newline for proper height
+    // Add a trailing newline to ensure scrolling matches if user adds many newlines
+    return withErrors.join("\n") + "\n\n";
   }, [lines, language, errors]);
 
-  // Compute column markers when code or errors change
-  useEffect(() => {
-    const ta = textareaRef.current;
-    if (!ta) {
-      setMarkers([]);
-      return;
-    }
+  // Current line error for status bar
+  const currentLineError = useMemo(() =>
+    getLineError(cursorPos.line, errors),
+  [cursorPos.line, errors]);
 
-    const cs = window.getComputedStyle(ta);
-    const fontSize = cs.fontSize || "14px";
-    const fontFamily = cs.fontFamily || "monospace";
-    const lineHeight = parseFloat(cs.lineHeight) || 22.4;
-    const padLeft = 16; // keep in sync with inline styles
-    const padTop = 16;
-
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.font = `${fontSize} ${fontFamily}`;
-    const charWidth = ctx.measureText("0").width || 8;
-
-    const newMarkers = errors
-      .filter((e) => typeof e.col === "number" && e.col! > 0 && e.line > 0)
+  // Error markers for the gutter/overlay
+  const markers = useMemo(() => {
+    // Note: Accurate pixel-perfect markers are hard with variable width fonts
+    // but since we use JetBrains Mono (monospaced), we can estimate.
+    return errors
+      .filter((e) => e.line > 0 && e.line <= totalLines)
       .map((e) => ({
-        id: `m-${e.line}-${e.col}`,
-        left: padLeft + (e.col! - 1) * charWidth,
-        top: padTop + (e.line - 1) * lineHeight,
+        id: `m-${e.line}-${e.col || 0}`,
+        line: e.line,
         severity: e.severity,
       }));
-
-    setMarkers(newMarkers);
-  }, [errors, code]);
-
-  // Handle line hover for error tooltip
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!lineNumbersRef.current || errors.length === 0) return;
-
-      const lineHeight = 22.4; // 14px font * 1.6 line-height
-      const rect = lineNumbersRef.current.getBoundingClientRect();
-      const scrollTop = textareaRef.current?.scrollTop || 0;
-      const relY = e.clientY - rect.top + scrollTop;
-      const lineNum = Math.floor(relY / lineHeight) + 1;
-
-      const err = getLineError(lineNum, errors);
-      setHoveredError(err || null);
-      if (err) {
-        setTooltipPos({ x: e.clientX + 10, y: e.clientY - 10 });
-      }
-    },
-    [errors]
-  );
+  }, [errors, totalLines]);
 
   return (
-    <div className="relative flex h-full min-h-0">
-      {/* Line numbers column */}
-      <div
-        ref={lineNumbersRef}
-        className="flex-none w-12 md:w-14 overflow-hidden select-none border-r border-white/5 bg-bg-editor"
-        style={{ scrollbarWidth: "none" }}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoveredError(null)}
-      >
-        <div className="py-4">
-          {Array.from({ length: totalLines }, (_, i) => {
-            const lineNum = i + 1;
-            const lineError = getLineError(lineNum, errors);
-            return (
-              <div
-                key={lineNum}
-                className={`flex items-center justify-end pr-2 md:pr-3 font-mono text-xs
-                  ${
-                    lineError
-                      ? lineError.severity === "error"
-                        ? "text-error-red"
-                        : lineError.severity === "warning"
-                        ? "text-warning"
-                        : "text-accent-cyan"
-                      : "text-text-muted/40"
-                  }`}
-                style={{ height: "22.4px", lineHeight: "22.4px" }}
-              >
-                {lineError ? (
-                  <span
-                    className={`mr-1 text-xs ${
-                      lineError.severity === "error"
-                        ? "text-error-red"
-                        : "text-warning"
-                    }`}
-                  >
-                    ●
-                  </span>
-                ) : null}
-                {lineNum}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Editor body */}
-      <div className="relative flex-1 min-w-0 overflow-hidden editor-container bg-bg-editor">
-        {/* Syntax highlight layer (behind textarea) */}
+    <div className="flex flex-col h-full border border-white/5 rounded-xl overflow-hidden bg-bg-editor">
+      <div className="flex flex-1 min-h-0 relative">
+        {/* Line numbers column */}
         <div
-          ref={highlightRef}
-          className="editor-highlight absolute inset-0 font-mono text-sm pointer-events-none"
-          style={{
-            fontSize: 14,
-            lineHeight: "22.4px",
-            overflowX: "auto",
-            overflowY: "hidden",
-            paddingTop: 16,
-            paddingBottom: 16,
-            paddingLeft: 16,
-            paddingRight: 16,
-          }}
-          dangerouslySetInnerHTML={{ __html: getHighlightedHTML() }}
-        />
-
-        {/* Actual textarea (invisible text, visible caret) */}
-        <textarea
-          ref={textareaRef}
-          value={code}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onKeyUp={updateCursor}
-          onClick={updateCursor}
-          onSelect={updateCursor}
-          className="editor-textarea font-mono text-sm editor-scroll"
-          style={{
-            fontSize: 14,
-            lineHeight: "22.4px",
-            paddingTop: 16,
-            paddingBottom: 16,
-            paddingLeft: 16,
-            paddingRight: 16,
-          }}
-          placeholder="// Paste your code here, or upload a screenshot below..."
-          spellCheck={false}
-          autoCapitalize="none"
-          autoCorrect="off"
-          autoComplete="off"
-          aria-label="Code editor"
-        />
-
-        {/* Column markers overlay (above highlight, pointer-events none) */}
-        <div
-          ref={overlayRef}
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            fontSize: 14,
-            lineHeight: "22.4px",
-            overflowX: "auto",
-            overflowY: "hidden",
-            paddingTop: 16,
-            paddingBottom: 16,
-            paddingLeft: 16,
-            paddingRight: 16,
-            zIndex: 3,
-          }}
+          ref={lineNumbersRef}
+          className="flex-none w-12 md:w-14 overflow-hidden select-none border-r border-white/5 bg-bg-editor/50"
         >
-          {markers.map((m) => (
-            <div
-              key={m.id}
-              style={{
-                position: "absolute",
-                left: m.left,
-                top: m.top + 8,
-                width: 8,
-                height: 8,
-                borderRadius: 9999,
-                background:
-                  m.severity === "error" ? "#ef4444" : "#f59e0b",
-                boxShadow: "0 0 6px rgba(0,0,0,0.4)",
-                transform: "translateY(-50%)",
-              }}
-            />
-          ))}
-        </div>
+          <div className="py-4">
+            {Array.from({ length: totalLines }, (_, i) => {
+              const lineNum = i + 1;
+              const lineError = getLineError(lineNum, errors);
+              const isCurrentLine = cursorPos.line === lineNum;
 
-        {/* Empty state hint */}
-        {!code && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="text-center text-text-muted/30 select-none">
-              <svg
-                className="mx-auto mb-3 opacity-30"
-                width="48"
-                height="48"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1"
-              >
-                <polyline points="16 18 22 12 16 6" />
-                <polyline points="8 6 2 12 8 18" />
-              </svg>
-              <p className="font-mono text-sm">Start typing or paste code</p>
-            </div>
+              return (
+                <div
+                  key={lineNum}
+                  className={`flex items-center justify-end pr-3 font-mono text-[11px] transition-colors
+                    ${isCurrentLine ? "bg-white/5 text-text-primary" : "text-text-muted/30"}
+                    ${lineError ? (lineError.severity === "error" ? "text-error-red/80" : "text-warning-orange/80") : ""}`}
+                  style={{ height: "22.4px" }}
+                >
+                  {lineNum}
+                </div>
+              );
+            })}
           </div>
-        )}
+        </div>
+
+        {/* Editor body */}
+        <div className="relative flex-1 min-w-0 editor-container group">
+          {/* Syntax layer */}
+          <div
+            ref={highlightRef}
+            className="editor-layer font-mono text-sm text-text-primary"
+            dangerouslySetInnerHTML={{ __html: highlightedHTML }}
+          />
+
+          {/* Overlay for decorations (like red underlines or dots) */}
+          <div ref={overlayRef} className="editor-layer overflow-hidden">
+            {/* You could add custom underline decorations here if needed */}
+          </div>
+
+          {/* Interaction layer (Textarea) */}
+          <textarea
+            ref={textareaRef}
+            value={code}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onKeyUp={updateCursor}
+            onClick={updateCursor}
+            onSelect={updateCursor}
+            className="editor-textarea editor-scroll"
+            placeholder="// Paste your code or upload a screenshot..."
+            spellCheck={false}
+            autoCapitalize="none"
+            autoCorrect="off"
+            autoComplete="off"
+          />
+        </div>
       </div>
 
-      {/* Error tooltip */}
-      {hoveredError && (
-        <div
-          className="fixed z-50 max-w-xs p-3 rounded-lg bg-bg-card border border-error-red/20
-                       shadow-xl shadow-black/50 pointer-events-none animate-fade-in"
-          style={{ left: tooltipPos.x, top: tooltipPos.y }}
-        >
-          <p className="text-xs font-medium text-error-red mb-1">
-            {hoveredError.severity === "error"
-              ? "Error"
-              : hoveredError.severity === "warning"
-              ? "Warning"
-              : "Info"}{" "}
-            — Line {hoveredError.line}
-          </p>
-          <p className="text-xs text-text-secondary">{hoveredError.message}</p>
-          <p className="text-xs text-accent-cyan mt-1">
-            Fix: {hoveredError.fix}
-          </p>
+      {/* Editor Status Bar */}
+      <div className="flex-none h-8 px-4 flex items-center justify-between border-t border-white/5 bg-bg-secondary/80 text-[11px] font-mono select-none">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <span className="text-text-muted">Ln</span>
+            <span className="text-accent-cyan">{cursorPos.line}</span>
+            <span className="text-text-muted ml-1">Col</span>
+            <span className="text-accent-cyan">{cursorPos.col}</span>
+          </div>
+
+          {currentLineError && (
+            <div className={`flex items-center gap-2 animate-fade-in
+              ${currentLineError.severity === "error" ? "text-error-red" : "text-warning-orange"}`}>
+              <span className="w-1.5 h-1.5 rounded-full bg-current" />
+              <span className="truncate max-w-[300px] md:max-w-md">
+                {currentLineError.message}
+              </span>
+            </div>
+          )}
         </div>
-      )}
+
+        <div className="flex items-center gap-4 text-text-muted">
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${errors.length > 0 ? (errors.some(e => e.severity === 'error') ? 'bg-error-red' : 'bg-warning-orange') : 'bg-emerald-500'}`} />
+            <span>{errors.length} {errors.length === 1 ? 'issue' : 'issues'}</span>
+          </div>
+          <span className="uppercase">{language}</span>
+        </div>
+      </div>
     </div>
   );
 }
