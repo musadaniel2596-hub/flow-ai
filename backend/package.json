@@ -4,7 +4,7 @@
   "description": "Flow AI Backend - AI-powered code debugging API",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc",
+    "build": "npm ci --include=dev && tsc",
     "start": "node dist/server.js",
     "dev": "ts-node src/server.ts"
   },
