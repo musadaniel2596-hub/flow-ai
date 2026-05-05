@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { AnalysisResult, AnalysisState } from "@/types";
 import { analyzeCode, analyzeImage } from "@/lib/api";
 import { detectLanguage } from "@/lib/detectLanguage";
 import Header from "@/components/Layout/Header";
 import EditorToolbar from "@/components/Editor/EditorToolbar";
-import Editor from "@/components/Editor/Editor";
+import Editor, { EditorHandle } from "@/components/Editor/Editor";
 import ErrorPanel from "@/components/AI/ErrorPanel";
 import FixPanel from "@/components/AI/FixPanel";
 import CameraUpload from "@/components/Scanner/CameraUpload";
@@ -21,7 +21,7 @@ const SAMPLE_CODE = `function calculateTotal(items) {
 }
 
 const cart = [
-  { name: 'Apple', price: 1.5 }
+  { name: 'Apple', price: 1.5 },
   { name: 'Bread', price: 2.99 },
 ]
 
@@ -36,6 +36,8 @@ export default function HomePage() {
   const [cursorLine, setCursorLine] = useState(1);
   const [cursorCol, setCursorCol] = useState(1);
   const [imageLoading, setImageLoading] = useState(false);
+
+  const editorRef = useRef<EditorHandle>(null);
 
   // Detect language from code (client-side heuristic)
   const detectedLanguage = detectLanguage(code);
@@ -72,10 +74,8 @@ export default function HomePage() {
 
     try {
       const data = await analyzeImage(file);
-      // If vision extracted code, put it in editor
-      if (data.fixedCode || data.errors.length > 0) {
-        // Use fixedCode as the "extracted" code if no original errors
-        // or set editor to extracted version
+      if (data.fixedCode && !code.trim()) {
+        setCode(data.fixedCode);
       }
       setResult(data);
       setAnalysisState("success");
@@ -87,7 +87,7 @@ export default function HomePage() {
     } finally {
       setImageLoading(false);
     }
-  }, []);
+  }, [code]);
 
   // ─── Editor Actions ─────────────────────────────────────────────────────────
 
@@ -96,6 +96,7 @@ export default function HomePage() {
     setResult(null);
     setError(null);
     setAnalysisState("idle");
+    editorRef.current?.focus();
   }, []);
 
   const handleCopy = useCallback(async () => {
@@ -110,6 +111,11 @@ export default function HomePage() {
     setCode(fixedCode);
     setResult(null);
     setAnalysisState("idle");
+    editorRef.current?.focus();
+  }, []);
+
+  const handleSelectError = useCallback((line: number) => {
+    editorRef.current?.scrollToLine(line);
   }, []);
 
   // Keyboard shortcut: Ctrl/Cmd+Enter to analyze
@@ -166,7 +172,7 @@ export default function HomePage() {
       />
 
       {/* ── Main content: scrollable area ── */}
-      <div className="flex-1 overflow-y-auto min-h-0 relative">
+      <div className="flex-1 overflow-y-auto min-h-0 relative editor-scroll">
         {/* Loading overlay */}
         {analysisState === "loading" && (
           <div className="absolute top-0 left-0 right-0 z-20 h-0.5 overflow-hidden">
@@ -182,10 +188,11 @@ export default function HomePage() {
 
         {/* ── Editor ── */}
         <div
-          style={{ minHeight: "320px", height: "clamp(320px, 50vh, 600px)" }}
+          style={{ minHeight: "400px", height: "50vh" }}
           className="flex flex-col border-b border-white/5"
         >
           <Editor
+            ref={editorRef}
             code={code}
             language={displayLanguage}
             errors={result?.errors || []}
@@ -198,14 +205,16 @@ export default function HomePage() {
         </div>
 
         {/* ── Camera upload ── */}
-        <CameraUpload
-          onImageSelected={handleImageSelected}
-          isLoading={imageLoading}
-        />
+        {!hasResult && (
+          <CameraUpload
+            onImageSelected={handleImageSelected}
+            isLoading={imageLoading}
+          />
+        )}
 
         {/* ── Keyboard shortcut hint ── */}
-        {analysisState === "idle" && code.trim() && (
-          <div className="px-4 md:px-6 py-2 text-center">
+        {analysisState === "idle" && code.trim() && !hasResult && (
+          <div className="px-4 md:px-6 py-4 text-center">
             <p className="text-xs text-text-muted/50">
               Press{" "}
               <kbd className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 font-mono text-xs text-text-muted">
@@ -219,7 +228,7 @@ export default function HomePage() {
 
         {/* ── Error state ── */}
         {analysisState === "error" && error && (
-          <div className="mx-4 md:mx-6 my-3 flex items-start gap-3 p-4 rounded-xl bg-error-red/10 border border-error-red/20 animate-slide-up">
+          <div className="mx-4 md:mx-6 my-4 flex items-start gap-3 p-4 rounded-xl bg-error-red/10 border border-error-red/20 animate-fade-in">
             <svg
               width="16"
               height="16"
@@ -238,61 +247,64 @@ export default function HomePage() {
                 Analysis Failed
               </p>
               <p className="text-xs text-text-secondary mt-0.5">{error}</p>
-              <p className="text-xs text-text-muted mt-1">
-                Check that your API key is set and you have internet access.
+              <p className="text-xs text-text-muted mt-2">
+                This might be due to a connection issue or an invalid API key.
               </p>
             </div>
           </div>
         )}
 
         {/* ── Results ── */}
-        <ErrorPanel
-          errors={result?.errors || []}
-          summary={result?.summary || ""}
-          language={result?.language || ""}
-          isVisible={hasResult}
-        />
+        <div className="max-w-5xl mx-auto w-full">
+          <ErrorPanel
+            errors={result?.errors || []}
+            summary={result?.summary || ""}
+            language={result?.language || ""}
+            isVisible={hasResult}
+            onSelectError={handleSelectError}
+          />
 
-        <FixPanel
-          fixedCode={result?.fixedCode || ""}
-          language={result?.language || displayLanguage}
-          isVisible={hasResult && !!result?.fixedCode}
-          onUseCode={handleUseFixedCode}
-        />
+          <FixPanel
+            fixedCode={result?.fixedCode || ""}
+            language={result?.language || displayLanguage}
+            isVisible={hasResult && !!result?.fixedCode}
+            onUseCode={handleUseFixedCode}
+          />
+        </div>
 
         {/* ── Bottom padding ── */}
-        <div className="h-8" />
+        <div className="h-12" />
       </div>
 
       {/* ── Status bar ── */}
-      <div className="flex-none flex items-center justify-between px-4 md:px-6 py-1.5 border-t border-white/5 bg-bg-secondary/80 text-xs text-text-muted font-mono">
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5">
+      <div className="flex-none flex items-center justify-between px-4 md:px-6 py-2 border-t border-white/5 bg-bg-secondary/80 text-[10px] text-text-muted font-mono uppercase tracking-wider">
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-2">
             <span
               className={`w-1.5 h-1.5 rounded-full ${
                 isLoading
-                  ? "bg-warning animate-pulse"
+                  ? "bg-warning-orange animate-pulse"
                   : hasResult
                   ? result && result.errors.length > 0
                     ? "bg-error-red"
-                    : "bg-success"
-                  : "bg-text-muted/30"
+                    : "bg-emerald-500"
+                  : "bg-white/10"
               }`}
             />
             {isLoading
               ? "Analyzing..."
               : hasResult
               ? result && result.errors.length > 0
-                ? `${result.errors.length} issue${result.errors.length !== 1 ? "s" : ""}`
-                : "Clean"
-              : "Ready"}
+                ? `${result.errors.length} ISSUE${result.errors.length !== 1 ? "S" : ""} FOUND`
+                : "NO ISSUES DETECTED"
+              : "READY"}
           </span>
         </div>
 
-        <div className="flex items-center gap-3 opacity-60">
-          <span>Flow AI v1.0</span>
-          <span>·</span>
-          <span>OpenRouter</span>
+        <div className="flex items-center gap-4 opacity-50">
+          <span>FLOW AI ENGINE v1.0</span>
+          <span className="w-1 h-1 rounded-full bg-white/20" />
+          <span>POWERED BY OPENROUTER</span>
         </div>
       </div>
     </div>

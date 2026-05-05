@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useCallback, useState, useMemo } from "react";
+import { useRef, useEffect, useCallback, useState, useMemo, useImperativeHandle, forwardRef } from "react";
 import { CodeError } from "@/types";
 import { highlightSyntax } from "@/lib/syntaxColors";
 import { applyErrorHighlights, getLineError } from "@/lib/highlightErrors";
@@ -13,26 +13,28 @@ interface EditorProps {
   onCursorChange: (line: number, col: number) => void;
 }
 
-export default function Editor({
+export interface EditorHandle {
+  scrollToLine: (line: number) => void;
+  focus: () => void;
+}
+
+const Editor = forwardRef<EditorHandle, EditorProps>(({
   code,
   language,
   errors,
   onChange,
   onCursorChange,
-}: EditorProps) {
+}, ref) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
 
-  const [hoveredError, setHoveredError] = useState<CodeError | null>(null);
-  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
 
   const lines = useMemo(() => code.split("\n"), [code]);
   const totalLines = lines.length;
 
-  // Sync scroll between textarea and all other layers
   const syncScroll = useCallback(() => {
     if (!textareaRef.current) return;
     const { scrollTop, scrollLeft } = textareaRef.current;
@@ -50,16 +52,40 @@ export default function Editor({
     }
   }, []);
 
+  // Exposed methods for parent
+  useImperativeHandle(ref, () => ({
+    scrollToLine: (line: number) => {
+      if (!textareaRef.current) return;
+      const lineHeight = 22.4; // Matches CSS
+      const targetScroll = (line - 1) * lineHeight;
+
+      textareaRef.current.scrollTo({
+        top: Math.max(0, targetScroll - 44), // Offset a bit to show context
+        behavior: "smooth"
+      });
+
+      // Move cursor to that line
+      const textLines = code.split("\n");
+      let charPos = 0;
+      for (let i = 0; i < Math.min(line - 1, textLines.length); i++) {
+        charPos += textLines[i].length + 1;
+      }
+
+      textareaRef.current.focus();
+      textareaRef.current.setSelectionRange(charPos, charPos);
+      updateCursor();
+    },
+    focus: () => textareaRef.current?.focus(),
+  }));
+
   useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
     ta.addEventListener("scroll", syncScroll);
-    // Initial sync
     syncScroll();
     return () => ta.removeEventListener("scroll", syncScroll);
-  }, [syncScroll]);
+  }, [syncScroll, code]);
 
-  // Update cursor position and notify parent
   const updateCursor = useCallback(() => {
     const ta = textareaRef.current;
     if (!ta) return;
@@ -73,7 +99,6 @@ export default function Editor({
     onCursorChange(line, col);
   }, [onCursorChange]);
 
-  // Handle keyboard events (Tab, etc.)
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === "Tab") {
@@ -85,7 +110,6 @@ export default function Editor({
           ta.value.substring(0, start) + "  " + ta.value.substring(end);
         onChange(newValue);
 
-        // Use requestAnimationFrame to ensure React has rendered the new value
         requestAnimationFrame(() => {
           ta.selectionStart = ta.selectionEnd = start + 2;
           updateCursor();
@@ -95,38 +119,21 @@ export default function Editor({
     [onChange, updateCursor]
   );
 
-  // Build highlighted HTML
   const highlightedHTML = useMemo(() => {
     const highlightedLines = lines.map((line) =>
       highlightSyntax(line || " ", language)
     );
     const withErrors = applyErrorHighlights(highlightedLines, errors);
-    // Add a trailing newline to ensure scrolling matches if user adds many newlines
     return withErrors.join("\n") + "\n\n";
   }, [lines, language, errors]);
 
-  // Current line error for status bar
   const currentLineError = useMemo(() =>
     getLineError(cursorPos.line, errors),
   [cursorPos.line, errors]);
 
-  // Error markers for the gutter/overlay
-  const markers = useMemo(() => {
-    // Note: Accurate pixel-perfect markers are hard with variable width fonts
-    // but since we use JetBrains Mono (monospaced), we can estimate.
-    return errors
-      .filter((e) => e.line > 0 && e.line <= totalLines)
-      .map((e) => ({
-        id: `m-${e.line}-${e.col || 0}`,
-        line: e.line,
-        severity: e.severity,
-      }));
-  }, [errors, totalLines]);
-
   return (
     <div className="flex flex-col h-full border border-white/5 rounded-xl overflow-hidden bg-bg-editor">
       <div className="flex flex-1 min-h-0 relative">
-        {/* Line numbers column */}
         <div
           ref={lineNumbersRef}
           className="flex-none w-12 md:w-14 overflow-hidden select-none border-r border-white/5 bg-bg-editor/50"
@@ -152,21 +159,15 @@ export default function Editor({
           </div>
         </div>
 
-        {/* Editor body */}
         <div className="relative flex-1 min-w-0 editor-container group">
-          {/* Syntax layer */}
           <div
             ref={highlightRef}
             className="editor-layer font-mono text-sm text-text-primary"
             dangerouslySetInnerHTML={{ __html: highlightedHTML }}
           />
 
-          {/* Overlay for decorations (like red underlines or dots) */}
-          <div ref={overlayRef} className="editor-layer overflow-hidden">
-            {/* You could add custom underline decorations here if needed */}
-          </div>
+          <div ref={overlayRef} className="editor-layer overflow-hidden" />
 
-          {/* Interaction layer (Textarea) */}
           <textarea
             ref={textareaRef}
             value={code}
@@ -185,7 +186,6 @@ export default function Editor({
         </div>
       </div>
 
-      {/* Editor Status Bar */}
       <div className="flex-none h-8 px-4 flex items-center justify-between border-t border-white/5 bg-bg-secondary/80 text-[11px] font-mono select-none">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5">
@@ -216,4 +216,7 @@ export default function Editor({
       </div>
     </div>
   );
-}
+});
+
+Editor.displayName = "Editor";
+export default Editor;
